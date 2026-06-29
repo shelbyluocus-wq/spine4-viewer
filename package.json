@@ -1,0 +1,60 @@
+{
+  "name": "spine4-viewer",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Windows-friendly Spine 4.2 viewer with fixed spine folder scanning and legacy detection.",
+  "author": "OpenAI Codex",
+  "type": "module",
+  "main": "dist-electron/electron/main.js",
+  "scripts": {
+    "dev": "concurrently -k \"npm:dev:renderer\" \"npm:dev:electron\" \"npm:dev:app\"",
+    "dev:app": "wait-on tcp:5173 file:dist-electron/electron/main.js && electron .",
+    "dev:electron": "tsc -p tsconfig.electron.json --watch --preserveWatchOutput",
+    "dev:renderer": "vite",
+    "build": "npm run build:renderer && npm run build:electron",
+    "build:electron": "node ./scripts/build-electron.mjs",
+    "build:renderer": "vite build",
+    "package": "npm run build && electron-builder && node ./scripts/prepare-release-spine.mjs",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "build": {
+    "appId": "com.newspine.viewer4",
+    "productName": "Spine 4.2 Viewer",
+    "directories": {
+      "buildResources": "build-resources",
+      "output": "release"
+    },
+    "extraResources": [
+      {
+        "from": "build-resources/icon.ico",
+        "to": "icon.ico"
+      }
+    ],
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*",
+      "package.json"
+    ],
+    "win": {
+      "icon": "build-resources/icon.ico",
+      "target": [
+        "portable"
+      ]
+    }
+  },
+  "dependencies": {
+    "@esotericsoftware/spine-player": "^4.2.108"
+  },
+  "devDependencies": {
+    "@types/node": "^24.5.2",
+    "concurrently": "^9.2.1",
+    "electron": "^37.2.0",
+    "electron-builder": "^26.0.12",
+    "typescript": "~5.9.3",
+    "vite": "^8.0.1",
+    "vitest": "^3.2.4",
+    "wait-on": "^8.0.5"
+  }
+}

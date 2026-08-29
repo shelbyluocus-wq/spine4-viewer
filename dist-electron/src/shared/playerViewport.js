@@ -28,6 +28,11 @@ export function createCocosLikeViewport(bounds, canvasSize) {
         height,
     };
 }
+export const MIN_PREVIEW_SCALE = 0.5;
+export const MAX_PREVIEW_SCALE = 2.5;
+export function clampPreviewScale(scale) {
+    return Math.min(MAX_PREVIEW_SCALE, Math.max(MIN_PREVIEW_SCALE, scale));
+}
 export function createAnchorLockedViewport(canvasSize, previewScale = 1) {
     const normalizedScale = Math.max(previewScale, 0.01);
     const width = Math.max(canvasSize.width / normalizedScale, 1);
@@ -40,6 +45,47 @@ export function createAnchorLockedViewport(canvasSize, previewScale = 1) {
         width,
         height,
     };
+}
+export function createPannableViewport(canvasSize, view) {
+    const base = createAnchorLockedViewport(canvasSize, view.scale);
+    return {
+        x: base.x + view.panX,
+        y: base.y + view.panY,
+        width: base.width,
+        height: base.height,
+    };
+}
+export function zoomAtScreenPoint(canvasSize, view, screenPoint, nextScale) {
+    const scale = clampPreviewScale(nextScale);
+    const canvasWidth = Math.max(canvasSize.width, 1);
+    const canvasHeight = Math.max(canvasSize.height, 1);
+    const normalizedX = screenPoint.x / canvasWidth;
+    const normalizedY = 1 - screenPoint.y / canvasHeight;
+    const current = createPannableViewport(canvasSize, view);
+    const worldX = current.x + normalizedX * current.width;
+    const worldY = current.y + normalizedY * current.height;
+    const nextBase = createAnchorLockedViewport(canvasSize, scale);
+    return {
+        scale,
+        panX: worldX - (nextBase.x + normalizedX * nextBase.width),
+        panY: worldY - (nextBase.y + normalizedY * nextBase.height),
+    };
+}
+export function panByPixels(canvasSize, view, dxPixels, dyPixels) {
+    const viewport = createPannableViewport(canvasSize, view);
+    const canvasWidth = Math.max(canvasSize.width, 1);
+    const canvasHeight = Math.max(canvasSize.height, 1);
+    return {
+        ...view,
+        panX: view.panX - (dxPixels * viewport.width) / canvasWidth,
+        panY: view.panY + (dyPixels * viewport.height) / canvasHeight,
+    };
+}
+export function resetSkeletonPhysics(player) {
+    if (!player.skeleton) {
+        return;
+    }
+    player.skeleton.updateWorldTransform(Physics.reset);
 }
 export function getPlayerCanvasSize(player) {
     const canvas = player.canvas;
@@ -97,7 +143,9 @@ export function setAnimationPreservingViewport(player, animationName, loop = tru
     if (instance.config) {
         instance.config.animation = animation.name;
     }
-    return player.animationState.setAnimationWith(0, animation, loop);
+    const trackEntry = player.animationState.setAnimationWith(0, animation, loop);
+    player.skeleton.updateWorldTransform(Physics.reset);
+    return trackEntry;
 }
 function getDevicePixelRatio() {
     if (typeof window !== 'undefined' && window.devicePixelRatio) {

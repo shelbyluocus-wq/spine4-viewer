@@ -359,8 +359,25 @@ h2 {
     radial-gradient(circle at top, rgba(225, 29, 72, 0.12), transparent 24%),
     linear-gradient(180deg, #12050c, #0f0710 52%, #12050c);
   isolation: isolate;
-  --preview-width: 72%;
-  --preview-height: 84%;
+  touch-action: none;
+  user-select: none;
+}
+
+.stage-frame[data-bg-mode='custom'] {
+  background: var(--stage-bg, #12050c);
+}
+
+.stage-frame[data-bg-mode='custom'] .stage-backdrop,
+.stage-frame[data-bg-mode='custom'] .stage-grid {
+  display: none;
+}
+
+.stage-frame[data-state='supported']:not([data-loading='true']) {
+  cursor: grab;
+}
+
+.stage-frame.is-panning {
+  cursor: grabbing;
 }
 
 .stage-backdrop,
@@ -414,11 +431,8 @@ h2 {
 }
 
 .stage-host > .spine-player {
-  width: min(var(--preview-width), 900px);
-  height: min(var(--preview-height), 900px);
-  transition:
-    width 180ms ease,
-    height 180ms ease;
+  width: 100%;
+  height: 100%;
 }
 
 .stage-frame[data-loading='true']::before {
@@ -616,6 +630,68 @@ h2 {
   accent-color: var(--secondary);
 }
 
+.control-hint {
+  display: block;
+  margin-top: 8px;
+  color: var(--soft);
+  font-size: 0.82rem;
+}
+
+.bg-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.bg-swatch {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  border-radius: 999px;
+  background: var(--swatch, transparent);
+  cursor: pointer;
+  transition:
+    box-shadow 180ms ease,
+    border-color 180ms ease,
+    transform 180ms ease;
+}
+
+.bg-swatch:hover {
+  transform: translateY(-1px);
+  border-color: rgba(255, 255, 255, 0.4);
+}
+
+.bg-swatch.is-default {
+  background:
+    radial-gradient(circle at 30% 25%, rgba(255, 255, 255, 0.22), transparent 42%),
+    linear-gradient(135deg, #12050c, #2c0b1a 55%, #12050c);
+}
+
+.bg-swatch.is-active {
+  border-color: transparent;
+  box-shadow: 0 0 0 2px var(--secondary);
+}
+
+.bg-color-input {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  border-radius: 999px;
+  background: none;
+  cursor: pointer;
+}
+
+.bg-color-input::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+.bg-color-input::-webkit-color-swatch {
+  border: none;
+  border-radius: 999px;
+}
+
 @media (max-width: 1280px) {
   .workspace {
     grid-template-columns: 300px minmax(0, 1fr);
@@ -643,10 +719,5 @@ h2 {
 
   .panel-stage {
     min-height: 500px;
-  }
-
-  .stage-host > .spine-player {
-    width: min(var(--preview-width), 680px);
-    height: min(var(--preview-height), 720px);
   }
 }

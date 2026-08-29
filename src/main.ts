@@ -9,12 +9,18 @@ import { buildAnimationMetadata } from './shared/animationMetadata'
 import { buildAnimationListMarkup } from './shared/animationListMarkup'
 import { projectWorldPointToStage } from './shared/anchorMarker'
 import {
-  createAnchorLockedViewport,
+  createPannableViewport,
   getPlayerCanvasSize,
   installFixedViewport,
+  MAX_PREVIEW_SCALE,
+  MIN_PREVIEW_SCALE,
+  panByPixels,
+  resetSkeletonPhysics,
   setAnimationPreservingViewport,
+  zoomAtScreenPoint,
 } from './shared/playerViewport'
-import { getPlayerBackgroundColor, getPreviewLayoutStyle } from './shared/previewLayout'
+import type { ViewState } from './shared/playerViewport'
+import { getPlayerBackgroundColor } from './shared/previewLayout'
 import type { SpineAssetEntry, ViewerState } from './shared/types'
 import { pickInitialAnimation, pickInitialAsset, pickInitialSkin } from './shared/viewerState'
 
@@ -28,6 +34,10 @@ interface AppState extends ViewerState {
   player: SpinePlayer | null
   loadToken: number
   isLoadingPreview: boolean
+  panX: number
+  panY: number
+  backgroundMode: 'default' | 'custom'
+  backgroundCustom: string
 }
 
 interface AppRefs {
@@ -46,6 +56,10 @@ interface AppRefs {
   speedValue: HTMLSpanElement
   scaleRange: HTMLInputElement
   scaleValue: HTMLSpanElement
+  viewResetButton: HTMLButtonElement
+  bgRow: HTMLDivElement
+  bgValue: HTMLSpanElement
+  bgColorInput: HTMLInputElement
 }
 
 interface InstalledViewport {
@@ -72,10 +86,18 @@ const state: AppState = {
   isLooping: true,
   timeScale: 1,
   previewScale: 1,
+  panX: 0,
+  panY: 0,
+  backgroundMode: 'default',
+  backgroundCustom: '#ffffff',
 }
 
 let stageAnchorFrame = 0
 let viewportRefreshFrame = 0
+let panPointer: { pointerId: number; lastX: number; lastY: number } | null = null
+
+const STAGE_BACKGROUND_STORAGE_KEY = 'spine-viewer:stage-bg'
+const WHEEL_ZOOM_FACTOR = 0.0018
 
 const app = document.querySelector<HTMLDivElement>('#app')
 if (!app) {
@@ -100,7 +122,14 @@ const refs: AppRefs = {
   speedValue: must<HTMLSpanElement>('#speed-value'),
   scaleRange: must<HTMLInputElement>('#scale-range'),
   scaleValue: must<HTMLSpanElement>('#scale-value'),
+  viewResetButton: must<HTMLButtonElement>('#view-reset-button'),
+  bgRow: must<HTMLDivElement>('#bg-row'),
+  bgValue: must<HTMLSpanElement>('#bg-value'),
+  bgColorInput: must<HTMLInputElement>('#bg-color-input'),
 }
+
+loadStageBackgroundPreference()
+applyStageBackground()
 
 bindEvents()
 updateStaticControls()
@@ -149,9 +178,91 @@ function bindEvents(): void {
 
   refs.scaleRange.addEventListener('input', () => {
     state.previewScale = Number(refs.scaleRange.value)
-    applyPreviewScale()
     queueViewportRefresh()
     renderControls()
+  })
+
+  refs.viewResetButton.addEventListener('click', () => {
+    resetView()
+  })
+
+  refs.bgRow.addEventListener('click', (event) => {
+    const swatch = (event.target as HTMLElement | null)?.closest<HTMLButtonElement>('.bg-swatch')
+    if (!swatch) {
+      return
+    }
+
+    if (swatch.dataset.bgMode === 'default') {
+      state.backgroundMode = 'default'
+    } else if (swatch.dataset.bgColor) {
+      state.backgroundMode = 'custom'
+      state.backgroundCustom = swatch.dataset.bgColor
+    } else {
+      return
+    }
+
+    applyStageBackground()
+  })
+
+  refs.bgColorInput.addEventListener('input', () => {
+    const value = refs.bgColorInput.value
+    if (!isHexColor(value)) {
+      return
+    }
+
+    state.backgroundMode = 'custom'
+    state.backgroundCustom = value
+    applyStageBackground()
+  })
+
+  refs.stageFrame.addEventListener('wheel', (event) => {
+    if (!isStageInteractive()) {
+      return
+    }
+
+    event.preventDefault()
+    const deltaY = event.deltaMode === 1 ? event.deltaY * 16 : event.deltaY
+    applyZoomAt(event, state.previewScale * Math.exp(-deltaY * WHEEL_ZOOM_FACTOR))
+  }, { passive: false })
+
+  refs.stageFrame.addEventListener('pointerdown', (event) => {
+    if (event.button !== 0 || !isStageInteractive()) {
+      return
+    }
+
+    panPointer = { pointerId: event.pointerId, lastX: event.clientX, lastY: event.clientY }
+    refs.stageFrame.setPointerCapture(event.pointerId)
+    refs.stageFrame.classList.add('is-panning')
+  })
+
+  refs.stageFrame.addEventListener('pointermove', (event) => {
+    if (!panPointer || panPointer.pointerId !== event.pointerId) {
+      return
+    }
+
+    const dx = event.clientX - panPointer.lastX
+    const dy = event.clientY - panPointer.lastY
+    panPointer.lastX = event.clientX
+    panPointer.lastY = event.clientY
+    applyPanDelta(dx, dy)
+  })
+
+  const endPan = (event: PointerEvent): void => {
+    if (!panPointer || panPointer.pointerId !== event.pointerId) {
+      return
+    }
+
+    panPointer = null
+    refs.stageFrame.classList.remove('is-panning')
+  }
+
+  refs.stageFrame.addEventListener('pointerup', endPan)
+  refs.stageFrame.addEventListener('pointercancel', endPan)
+
+  refs.stageFrame.addEventListener('dblclick', () => {
+    if (isStageInteractive()) {
+      resetView()
+    }
   })
 }
 
@@ -184,6 +295,9 @@ async function loadAsset(entry: SpineAssetEntry): Promise<void> {
   state.skinNames = []
   state.selectedAnimation = null
   state.selectedSkin = null
+  state.panX = 0
+  state.panY = 0
+  state.previewScale = 1
   state.isLoadingPreview = entry.status === 'supported'
   renderAll()
 
@@ -237,7 +351,6 @@ async function loadAsset(entry: SpineAssetEntry): Promise<void> {
         state.isLoadingPreview = false
 
         applySkin()
-        applyPreviewScale()
         refreshFixedViewportForCurrentCanvas()
         applyAnimation()
         if (state.player) {
@@ -324,14 +437,11 @@ function renderAssetList(): void {
 
 function renderStage(): void {
   const selected = state.selectedAsset
-  const layout = getPreviewLayoutStyle(state.previewScale)
   const notice = getStageNotice(selected)
 
   refs.stageTitle.textContent = selected ? selected.name : '未选择资源'
   refs.stageFrame.dataset.state = getStageState(selected)
   refs.stageFrame.dataset.loading = state.isLoadingPreview ? 'true' : 'false'
-  refs.stageFrame.style.setProperty('--preview-width', `${layout.widthPercent}%`)
-  refs.stageFrame.style.setProperty('--preview-height', `${layout.heightPercent}%`)
 
   refs.stageNotice.textContent = notice
   refs.stageNotice.hidden = notice.length === 0
@@ -349,6 +459,7 @@ function renderControls(): void {
   refs.loopButton.disabled = !canInteract || !state.selectedAnimation
   refs.speedRange.disabled = !canInteract
   refs.scaleRange.disabled = state.isLoadingPreview
+  refs.viewResetButton.disabled = !isStageInteractive()
 
   refs.playButton.textContent = state.isPlaying ? '暂停' : '播放'
   refs.loopButton.textContent = state.isLooping ? '循环中' : '单次'
@@ -357,6 +468,8 @@ function renderControls(): void {
   refs.speedValue.textContent = `${state.timeScale.toFixed(2)}x`
   refs.scaleRange.value = state.previewScale.toFixed(2)
   refs.scaleValue.textContent = `${state.previewScale.toFixed(2)}x`
+
+  renderBackgroundControls()
 }
 
 function renderAnimationList(canInteract: boolean): void {
@@ -400,14 +513,9 @@ function applySkin(): void {
 
   state.player.skeleton.setSkinByName(state.selectedSkin)
   state.player.skeleton.setSlotsToSetupPose()
+  resetSkeletonPhysics(state.player)
   renderControls()
   queueStageAnchorRender()
-}
-
-function applyPreviewScale(): void {
-  const layout = getPreviewLayoutStyle(state.previewScale)
-  refs.stageFrame.style.setProperty('--preview-width', `${layout.widthPercent}%`)
-  refs.stageFrame.style.setProperty('--preview-height', `${layout.heightPercent}%`)
 }
 
 function refreshFixedViewportForCurrentCanvas(): void {
@@ -415,11 +523,128 @@ function refreshFixedViewportForCurrentCanvas(): void {
     return
   }
 
-  const viewport = createAnchorLockedViewport(
+  const viewport = createPannableViewport(
     getPlayerCanvasSize(state.player),
-    state.previewScale,
+    { scale: state.previewScale, panX: state.panX, panY: state.panY },
   )
   installFixedViewport(state.player, viewport)
+}
+
+function isStageInteractive(): boolean {
+  return Boolean(
+    state.player
+    && state.selectedAsset?.status === 'supported'
+    && !state.isLoadingPreview,
+  )
+}
+
+function applyZoomAt(event: WheelEvent, nextScale: number): void {
+  if (!state.player) {
+    return
+  }
+
+  const canvasSize = getPlayerCanvasSize(state.player)
+  const rect = state.player.dom.getBoundingClientRect()
+  applyViewState(
+    zoomAtScreenPoint(
+      canvasSize,
+      currentViewState(),
+      { x: event.clientX - rect.left, y: event.clientY - rect.top },
+      nextScale,
+    ),
+  )
+  refreshFixedViewportForCurrentCanvas()
+  queueStageAnchorRender()
+  renderControls()
+}
+
+function applyPanDelta(dxPixels: number, dyPixels: number): void {
+  if (!state.player) {
+    return
+  }
+
+  applyViewState(
+    panByPixels(getPlayerCanvasSize(state.player), currentViewState(), dxPixels, dyPixels),
+  )
+  refreshFixedViewportForCurrentCanvas()
+  queueStageAnchorRender()
+}
+
+function resetView(): void {
+  applyViewState({ scale: 1, panX: 0, panY: 0 })
+  refreshFixedViewportForCurrentCanvas()
+  queueStageAnchorRender()
+  renderControls()
+}
+
+function currentViewState(): ViewState {
+  return { scale: state.previewScale, panX: state.panX, panY: state.panY }
+}
+
+function applyViewState(view: ViewState): void {
+  state.previewScale = view.scale
+  state.panX = view.panX
+  state.panY = view.panY
+}
+
+function applyStageBackground(): void {
+  if (state.backgroundMode === 'custom') {
+    refs.stageFrame.dataset.bgMode = 'custom'
+    refs.stageFrame.style.setProperty('--stage-bg', state.backgroundCustom)
+  } else {
+    refs.stageFrame.dataset.bgMode = 'default'
+    refs.stageFrame.style.removeProperty('--stage-bg')
+  }
+
+  refs.bgColorInput.value = state.backgroundCustom
+  persistStageBackgroundPreference()
+  renderBackgroundControls()
+}
+
+function renderBackgroundControls(): void {
+  refs.bgValue.textContent = state.backgroundMode === 'custom'
+    ? state.backgroundCustom.toUpperCase()
+    : '默认'
+
+  refs.bgRow.querySelectorAll<HTMLButtonElement>('.bg-swatch').forEach((swatch) => {
+    const isActive = swatch.dataset.bgMode === 'default'
+      ? state.backgroundMode === 'default'
+      : state.backgroundMode === 'custom'
+        && swatch.dataset.bgColor?.toLowerCase() === state.backgroundCustom.toLowerCase()
+    swatch.classList.toggle('is-active', isActive)
+  })
+}
+
+function loadStageBackgroundPreference(): void {
+  try {
+    const raw = window.localStorage.getItem(STAGE_BACKGROUND_STORAGE_KEY)
+    if (!raw) {
+      return
+    }
+
+    const parsed = JSON.parse(raw) as { mode?: unknown; color?: unknown }
+    if (parsed.mode === 'custom' && typeof parsed.color === 'string' && isHexColor(parsed.color)) {
+      state.backgroundMode = 'custom'
+      state.backgroundCustom = parsed.color
+    }
+  } catch {
+    // 忽略损坏的本地偏好
+  }
+}
+
+function persistStageBackgroundPreference(): void {
+  try {
+    window.localStorage.setItem(STAGE_BACKGROUND_STORAGE_KEY, JSON.stringify({
+      mode: state.backgroundMode,
+      color: state.backgroundCustom,
+    }))
+  } catch {
+    // 存储不可用时静默降级
+  }
+}
+
+function isHexColor(value: string): boolean {
+  return /^#[0-9a-f]{6}$/i.test(value)
 }
 
 function renderStageAnchor(): void {
@@ -519,6 +744,8 @@ function disposePlayer(): void {
     window.cancelAnimationFrame(stageAnchorFrame)
     stageAnchorFrame = 0
   }
+  panPointer = null
+  refs.stageFrame.classList.remove('is-panning')
   if (state.player) {
     state.player.dispose()
     state.player = null
@@ -531,8 +758,8 @@ function updateStaticControls(): void {
   refs.speedRange.min = '0.25'
   refs.speedRange.max = '3'
   refs.speedRange.step = '0.05'
-  refs.scaleRange.min = '0.5'
-  refs.scaleRange.max = '2.5'
+  refs.scaleRange.min = String(MIN_PREVIEW_SCALE)
+  refs.scaleRange.max = String(MAX_PREVIEW_SCALE)
   refs.scaleRange.step = '0.05'
   renderAll()
 }
@@ -678,7 +905,24 @@ function getAppMarkup(): string {
           <label class="control-block">
             <span class="control-label with-value">缩放 <span id="scale-value">1.00x</span></span>
             <input id="scale-range" class="control-range" type="range" aria-label="预览缩放">
+            <span class="control-hint">滚轮缩放 · 按住拖动移动 · 双击复位</span>
           </label>
+
+          <div class="control-row">
+            <button id="view-reset-button" class="ghost-button" type="button">重置视图</button>
+          </div>
+
+          <div class="control-block">
+            <span class="control-label with-value">背景 <span id="bg-value">默认</span></span>
+            <div id="bg-row" class="bg-row">
+              <button class="bg-swatch is-default" data-bg-mode="default" type="button" title="默认背景" aria-label="默认背景"></button>
+              <button class="bg-swatch" data-bg-color="#ffffff" type="button" title="白色" style="--swatch: #ffffff" aria-label="白色背景"></button>
+              <button class="bg-swatch" data-bg-color="#c9c9c9" type="button" title="浅灰" style="--swatch: #c9c9c9" aria-label="浅灰背景"></button>
+              <button class="bg-swatch" data-bg-color="#4a4a4a" type="button" title="深灰" style="--swatch: #4a4a4a" aria-label="深灰背景"></button>
+              <button class="bg-swatch" data-bg-color="#000000" type="button" title="黑色" style="--swatch: #000000" aria-label="黑色背景"></button>
+              <input id="bg-color-input" class="bg-color-input" type="color" value="#ffffff" title="自定义背景色" aria-label="自定义背景色">
+            </div>
+          </div>
         </aside>
       </main>
     </div>

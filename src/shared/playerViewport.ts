@@ -96,6 +96,19 @@ export function createCocosLikeViewport(
   }
 }
 
+export const MIN_PREVIEW_SCALE = 0.5
+export const MAX_PREVIEW_SCALE = 2.5
+
+export interface ViewState {
+  scale: number
+  panX: number
+  panY: number
+}
+
+export function clampPreviewScale(scale: number): number {
+  return Math.min(MAX_PREVIEW_SCALE, Math.max(MIN_PREVIEW_SCALE, scale))
+}
+
 export function createAnchorLockedViewport(
   canvasSize: { width: number; height: number },
   previewScale = 1,
@@ -112,6 +125,70 @@ export function createAnchorLockedViewport(
     width,
     height,
   }
+}
+
+export function createPannableViewport(
+  canvasSize: { width: number; height: number },
+  view: ViewState,
+): FixedViewport {
+  const base = createAnchorLockedViewport(canvasSize, view.scale)
+
+  return {
+    x: base.x + view.panX,
+    y: base.y + view.panY,
+    width: base.width,
+    height: base.height,
+  }
+}
+
+export function zoomAtScreenPoint(
+  canvasSize: { width: number; height: number },
+  view: ViewState,
+  screenPoint: { x: number; y: number },
+  nextScale: number,
+): ViewState {
+  const scale = clampPreviewScale(nextScale)
+  const canvasWidth = Math.max(canvasSize.width, 1)
+  const canvasHeight = Math.max(canvasSize.height, 1)
+  const normalizedX = screenPoint.x / canvasWidth
+  const normalizedY = 1 - screenPoint.y / canvasHeight
+
+  const current = createPannableViewport(canvasSize, view)
+  const worldX = current.x + normalizedX * current.width
+  const worldY = current.y + normalizedY * current.height
+
+  const nextBase = createAnchorLockedViewport(canvasSize, scale)
+
+  return {
+    scale,
+    panX: worldX - (nextBase.x + normalizedX * nextBase.width),
+    panY: worldY - (nextBase.y + normalizedY * nextBase.height),
+  }
+}
+
+export function panByPixels(
+  canvasSize: { width: number; height: number },
+  view: ViewState,
+  dxPixels: number,
+  dyPixels: number,
+): ViewState {
+  const viewport = createPannableViewport(canvasSize, view)
+  const canvasWidth = Math.max(canvasSize.width, 1)
+  const canvasHeight = Math.max(canvasSize.height, 1)
+
+  return {
+    ...view,
+    panX: view.panX - (dxPixels * viewport.width) / canvasWidth,
+    panY: view.panY + (dyPixels * viewport.height) / canvasHeight,
+  }
+}
+
+export function resetSkeletonPhysics(player: SpinePlayer): void {
+  if (!player.skeleton) {
+    return
+  }
+
+  player.skeleton.updateWorldTransform(Physics.reset)
 }
 
 export function getPlayerCanvasSize(player: SpinePlayer): { width: number; height: number } {
@@ -183,7 +260,10 @@ export function setAnimationPreservingViewport(
     instance.config.animation = animation.name
   }
 
-  return player.animationState.setAnimationWith(0, animation as Animation, loop)
+  const trackEntry = player.animationState.setAnimationWith(0, animation as Animation, loop)
+  player.skeleton.updateWorldTransform(Physics.reset)
+
+  return trackEntry
 }
 
 function getDevicePixelRatio(): number {

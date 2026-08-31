@@ -22,7 +22,7 @@ import {
 import type { ViewState } from './shared/playerViewport'
 import { getPlayerBackgroundColor } from './shared/previewLayout'
 import type { SpineAssetEntry, ViewerState } from './shared/types'
-import { pickInitialAnimation, pickInitialAsset, pickInitialSkin } from './shared/viewerState'
+import { filterAssetEntries, pickInitialAnimation, pickInitialAsset, pickInitialSkin } from './shared/viewerState'
 
 interface AppState extends ViewerState {
   entries: SpineAssetEntry[]
@@ -30,6 +30,7 @@ interface AppState extends ViewerState {
   skinNames: string[]
   rootPath: string
   scanMessage: string
+  assetSearchQuery: string
   previewMessage: string
   player: SpinePlayer | null
   loadToken: number
@@ -42,6 +43,8 @@ interface AppState extends ViewerState {
 
 interface AppRefs {
   assetList: HTMLDivElement
+  assetSearchInput: HTMLInputElement
+  assetSearchCount: HTMLSpanElement
   stageHost: HTMLDivElement
   stageFrame: HTMLDivElement
   stageTitle: HTMLHeadingElement
@@ -75,6 +78,7 @@ const state: AppState = {
   skinNames: [],
   rootPath: '',
   scanMessage: '',
+  assetSearchQuery: '',
   previewMessage: '',
   player: null,
   loadToken: 0,
@@ -108,6 +112,8 @@ app.innerHTML = getAppMarkup()
 
 const refs: AppRefs = {
   assetList: must<HTMLDivElement>('#asset-list'),
+  assetSearchInput: must<HTMLInputElement>('#asset-search-input'),
+  assetSearchCount: must<HTMLSpanElement>('#asset-search-count'),
   stageHost: must<HTMLDivElement>('#stage-host'),
   stageFrame: must<HTMLDivElement>('#stage-frame'),
   stageTitle: must<HTMLHeadingElement>('#stage-title'),
@@ -142,6 +148,11 @@ function bindEvents(): void {
 
   refs.refreshButton.addEventListener('click', () => {
     void scanAssets(state.selectedAsset?.name ?? null)
+  })
+
+  refs.assetSearchInput.addEventListener('input', () => {
+    state.assetSearchQuery = refs.assetSearchInput.value
+    renderAssetList()
   })
 
   refs.playButton.addEventListener('click', () => {
@@ -392,7 +403,10 @@ function renderAll(): void {
 }
 
 function renderAssetList(): void {
+  refs.assetSearchInput.disabled = state.entries.length === 0
+
   if (state.entries.length === 0) {
+    refs.assetSearchCount.textContent = '0 项'
     refs.assetList.innerHTML = `
       <div class="asset-empty">
         <p class="asset-empty-title">未找到资源</p>
@@ -402,7 +416,22 @@ function renderAssetList(): void {
     return
   }
 
-  refs.assetList.innerHTML = state.entries
+  const filteredEntries = filterAssetEntries(state.entries, state.assetSearchQuery)
+  refs.assetSearchCount.textContent = state.assetSearchQuery.trim()
+    ? `${filteredEntries.length} / ${state.entries.length} 项`
+    : `${state.entries.length} 项`
+
+  if (filteredEntries.length === 0) {
+    refs.assetList.innerHTML = `
+      <div class="asset-empty">
+        <p class="asset-empty-title">未找到匹配资源</p>
+        <p class="asset-empty-text">请尝试其他资源名称。</p>
+      </div>
+    `
+    return
+  }
+
+  refs.assetList.innerHTML = filteredEntries
     .map((entry) => {
       const isSelected = state.selectedAsset?.name === entry.name
       return `
@@ -848,6 +877,18 @@ function getAppMarkup(): string {
     <div class="shell">
       <header class="topbar">
         <h1>新版 Spine 资源查看器</h1>
+
+        <div class="topbar-background" aria-label="预览背景">
+          <span class="control-label with-value">背景 <span id="bg-value">默认</span></span>
+          <div id="bg-row" class="bg-row">
+            <button class="bg-swatch is-default" data-bg-mode="default" type="button" title="默认背景" aria-label="默认背景"></button>
+            <button class="bg-swatch" data-bg-color="#ffffff" type="button" title="白色" style="--swatch: #ffffff" aria-label="白色背景"></button>
+            <button class="bg-swatch" data-bg-color="#c9c9c9" type="button" title="浅灰" style="--swatch: #c9c9c9" aria-label="浅灰背景"></button>
+            <button class="bg-swatch" data-bg-color="#4a4a4a" type="button" title="深灰" style="--swatch: #4a4a4a" aria-label="深灰背景"></button>
+            <button class="bg-swatch" data-bg-color="#000000" type="button" title="黑色" style="--swatch: #000000" aria-label="黑色背景"></button>
+            <input id="bg-color-input" class="bg-color-input" type="color" value="#ffffff" title="自定义背景色" aria-label="自定义背景色">
+          </div>
+        </div>
       </header>
 
       <main class="workspace">
@@ -856,6 +897,17 @@ function getAppMarkup(): string {
             <h2>资源列表</h2>
             <button id="refresh-button" class="ghost-button" type="button">刷新</button>
           </div>
+          <label class="asset-search">
+            <input
+              id="asset-search-input"
+              class="asset-search-input"
+              type="search"
+              placeholder="搜索资源"
+              autocomplete="off"
+              aria-label="搜索资源名称"
+            >
+            <span id="asset-search-count" class="asset-search-count" aria-live="polite">0 项</span>
+          </label>
           <div id="asset-list" class="asset-list"></div>
         </aside>
 
@@ -910,18 +962,6 @@ function getAppMarkup(): string {
 
           <div class="control-row">
             <button id="view-reset-button" class="ghost-button" type="button">重置视图</button>
-          </div>
-
-          <div class="control-block">
-            <span class="control-label with-value">背景 <span id="bg-value">默认</span></span>
-            <div id="bg-row" class="bg-row">
-              <button class="bg-swatch is-default" data-bg-mode="default" type="button" title="默认背景" aria-label="默认背景"></button>
-              <button class="bg-swatch" data-bg-color="#ffffff" type="button" title="白色" style="--swatch: #ffffff" aria-label="白色背景"></button>
-              <button class="bg-swatch" data-bg-color="#c9c9c9" type="button" title="浅灰" style="--swatch: #c9c9c9" aria-label="浅灰背景"></button>
-              <button class="bg-swatch" data-bg-color="#4a4a4a" type="button" title="深灰" style="--swatch: #4a4a4a" aria-label="深灰背景"></button>
-              <button class="bg-swatch" data-bg-color="#000000" type="button" title="黑色" style="--swatch: #000000" aria-label="黑色背景"></button>
-              <input id="bg-color-input" class="bg-color-input" type="color" value="#ffffff" title="自定义背景色" aria-label="自定义背景色">
-            </div>
           </div>
         </aside>
       </main>

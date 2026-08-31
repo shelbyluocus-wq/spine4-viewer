@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { SpineAssetEntry } from './types'
-import { pickInitialAnimation, pickInitialAsset, pickInitialSkin } from './viewerState'
+import { filterAssetEntries, pickInitialAnimation, pickInitialAsset, pickInitialSkin } from './viewerState'
 
 const supportedEntry = (name: string): SpineAssetEntry => ({
   name,
@@ -31,6 +31,26 @@ describe('pickInitialAsset', () => {
     const result = pickInitialAsset([legacyEntry('old')])
 
     expect(result?.name).toBe('old')
+  })
+})
+
+describe('filterAssetEntries', () => {
+  const entries = [supportedEntry('Hero_Knight'), supportedEntry('hero_mage'), supportedEntry('Pet_Fox')]
+
+  it('matches resource names without case sensitivity', () => {
+    expect(filterAssetEntries(entries, 'HERO').map((entry) => entry.name)).toEqual([
+      'Hero_Knight',
+      'hero_mage',
+    ])
+  })
+
+  it('trims the search text and returns all resources for an empty query', () => {
+    expect(filterAssetEntries(entries, '  fox  ').map((entry) => entry.name)).toEqual(['Pet_Fox'])
+    expect(filterAssetEntries(entries, '   ')).toBe(entries)
+  })
+
+  it('returns an empty list when no resource name matches', () => {
+    expect(filterAssetEntries(entries, 'dragon')).toEqual([])
   })
 })
 

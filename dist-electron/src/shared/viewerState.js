@@ -3,6 +3,13 @@ const SKIN_PRIORITIES = ['default'];
 export function pickInitialAsset(entries) {
     return entries.find((entry) => entry.status === 'supported') ?? entries[0] ?? null;
 }
+export function filterAssetEntries(entries, query) {
+    const normalizedQuery = query.trim().toLocaleLowerCase();
+    if (!normalizedQuery) {
+        return entries;
+    }
+    return entries.filter((entry) => entry.name.toLocaleLowerCase().includes(normalizedQuery));
+}
 export function pickInitialAnimation(animationNames) {
     return pickPreferredValue(animationNames, ANIMATION_PRIORITIES);
 }

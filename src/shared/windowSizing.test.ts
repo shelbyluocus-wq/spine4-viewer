@@ -5,8 +5,8 @@ import { getDefaultWindowSizing } from './windowSizing'
 describe('getDefaultWindowSizing', () => {
   it('uses the preferred desktop size when the display has enough room', () => {
     expect(getDefaultWindowSizing({ width: 1920, height: 1080 })).toEqual({
-      width: 1540,
-      height: 920,
+      width: 1680,
+      height: 1000,
       minWidth: 1200,
       minHeight: 720,
     })

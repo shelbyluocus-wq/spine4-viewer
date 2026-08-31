@@ -7,6 +7,15 @@ export function pickInitialAsset(entries: SpineAssetEntry[]): SpineAssetEntry | 
   return entries.find((entry) => entry.status === 'supported') ?? entries[0] ?? null
 }
 
+export function filterAssetEntries(entries: SpineAssetEntry[], query: string): SpineAssetEntry[] {
+  const normalizedQuery = query.trim().toLocaleLowerCase()
+  if (!normalizedQuery) {
+    return entries
+  }
+
+  return entries.filter((entry) => entry.name.toLocaleLowerCase().includes(normalizedQuery))
+}
+
 export function pickInitialAnimation(animationNames: string[]): string | null {
   return pickPreferredValue(animationNames, ANIMATION_PRIORITIES)
 }

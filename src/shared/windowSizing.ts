@@ -11,8 +11,8 @@ export interface WindowSizing {
 }
 
 export function getDefaultWindowSizing(workArea: WorkAreaSize): WindowSizing {
-  const width = fitToWorkArea(workArea.width, 1540, 1280)
-  const height = fitToWorkArea(workArea.height, 920, 760)
+  const width = fitToWorkArea(workArea.width, 1680, 1280)
+  const height = fitToWorkArea(workArea.height, 1000, 760)
 
   return {
     width,

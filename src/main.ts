@@ -22,7 +22,13 @@ import {
 import type { ViewState } from './shared/playerViewport'
 import { getPlayerBackgroundColor } from './shared/previewLayout'
 import type { SpineAssetEntry, ViewerState } from './shared/types'
-import { filterAssetEntries, pickInitialAnimation, pickInitialAsset, pickInitialSkin } from './shared/viewerState'
+import {
+  filterAssetEntries,
+  pickInitialAnimation,
+  pickInitialAsset,
+  pickInitialSkin,
+  retainViewerSettingsOnAssetSwitch,
+} from './shared/viewerState'
 
 interface AppState extends ViewerState {
   entries: SpineAssetEntry[]
@@ -306,9 +312,12 @@ async function loadAsset(entry: SpineAssetEntry): Promise<void> {
   state.skinNames = []
   state.selectedAnimation = null
   state.selectedSkin = null
-  state.panX = 0
-  state.panY = 0
-  state.previewScale = 1
+  Object.assign(state, retainViewerSettingsOnAssetSwitch({
+    timeScale: state.timeScale,
+    previewScale: state.previewScale,
+    panX: state.panX,
+    panY: state.panY,
+  }))
   state.isLoadingPreview = entry.status === 'supported'
   renderAll()
 

@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest'
 
 import type { SpineAssetEntry } from './types'
-import { filterAssetEntries, pickInitialAnimation, pickInitialAsset, pickInitialSkin } from './viewerState'
+import {
+  filterAssetEntries,
+  pickInitialAnimation,
+  pickInitialAsset,
+  pickInitialSkin,
+  retainViewerSettingsOnAssetSwitch,
+} from './viewerState'
 
 const supportedEntry = (name: string): SpineAssetEntry => ({
   name,
@@ -74,5 +80,21 @@ describe('pickInitialSkin', () => {
   it('falls back to the first skin', () => {
     expect(pickInitialSkin(['red', 'blue'])).toBe('red')
     expect(pickInitialSkin([])).toBeNull()
+  })
+})
+
+describe('retainViewerSettingsOnAssetSwitch', () => {
+  it('keeps playback speed and preview zoom when switching resources', () => {
+    const next = retainViewerSettingsOnAssetSwitch({
+      timeScale: 1.75,
+      previewScale: 2.1,
+      panX: 40,
+      panY: -12,
+    })
+
+    expect(next.timeScale).toBe(1.75)
+    expect(next.previewScale).toBe(2.1)
+    expect(next.panX).toBe(0)
+    expect(next.panY).toBe(0)
   })
 })

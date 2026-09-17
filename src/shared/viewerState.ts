@@ -24,6 +24,24 @@ export function pickInitialSkin(skinNames: string[]): string | null {
   return pickPreferredValue(skinNames, SKIN_PRIORITIES)
 }
 
+export interface RetainedViewerSettings {
+  timeScale: number
+  previewScale: number
+  panX: number
+  panY: number
+}
+
+export function retainViewerSettingsOnAssetSwitch(
+  current: RetainedViewerSettings,
+): RetainedViewerSettings {
+  return {
+    timeScale: current.timeScale,
+    previewScale: current.previewScale,
+    panX: 0,
+    panY: 0,
+  }
+}
+
 function pickPreferredValue(values: string[], priorities: string[]): string | null {
   for (const priority of priorities) {
     const match = values.find((value) => value.toLowerCase().includes(priority))
